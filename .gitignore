@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+
+wandb/
+
+logging/
+
+lth/
+
+tutorial.ipynb
+
+data/
