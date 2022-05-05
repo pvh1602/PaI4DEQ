@@ -1,3 +1,4 @@
+from ast import arg
 import torch
 import torch.nn as nn
 import copy
@@ -12,6 +13,20 @@ from pruning_utils.prune import *
 from pruning_utils.pruners import *
 from pruning_utils.generator import *
 
+import wandb
+import random
+
+os.environ["WANDB_API_KEY"] = '5f62978928422ac0179258d5ccb983f8c7b065cf'
+os.environ["WANDB_MODE"] = "online"
+
+def seed_everything(seed=1023):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Pruning at Initialization for Monotone DEQ')
@@ -38,6 +53,8 @@ if __name__ == '__main__':
                         help='multiplicative factor of learning rate drop (default: 0.1)')
     training_args.add_argument('--weight-decay', type=float, default=0.0,
                         help='weight decay (default: 0.0)')
+    training_args.add_argument('--seed', type=int, default=2022)
+    
     # Pruning Hyperparameters
     pruning_args = parser.add_argument_group('pruning')
     pruning_args.add_argument('--is_pruning', action='store_true', default=False, help='True mean pruning')
@@ -75,34 +92,42 @@ if __name__ == '__main__':
     # MonDEQ
     mondeq_args = parser.add_argument_group('mondeq')
     mondeq_args.add_argument('--sp', type=str, default='PR', choices=['PR', 'FB'], help='PR for PeacemanRachford splitting and FB for forwardbackward splitting')
+    mondeq_args.add_argument('--out_dim', type=int, default=64, help='Out dim of SingleFcNet for MNIST')
+    mondeq_args.add_argument('--out_channels', type=int, default=64, help='Out channel of SingleConvNet')
+    mondeq_args.add_argument('--is_augmentation', action='store_true', default=False, help='Use augmentation for CIFAR-10')
+
+    parser.add_argument('--is_wandb', action='store_true', default=False)
+    parser.add_argument('--gpu', type=int, default='0',
+                        help='number of GPU device to use (default: 0)')
 
     args = parser.parse_args()
 
+    seed_everything(args.seed)
 
     if args.dataset == 'mnist':
         in_dim = 28**2
-        out_dim=64
+        out_dim = args.out_dim
         in_channels = 1
-        out_channels = 54
+        out_channels = args.out_channels
         conv_sizes=(16,32,32)
 
-        trainLoader, testLoader = train.mnist_loaders(train_batch_size=128, test_batch_size=400)
+        trainLoader, testLoader = train.mnist_loaders(train_batch_size=args.train_batch_size, test_batch_size=args.test_batch_size)
     
     elif args.dataset == 'cifar10':
         in_dim = 32
         in_channels = 3
-        out_channels = 200
+        out_channels = args.out_channels
         conv_sizes=(64,128,128)
 
-        trainLoader, testLoader = train.cifar_loaders(train_batch_size=128, test_batch_size=400, augment=False)
+        trainLoader, testLoader = train.cifar_loaders(train_batch_size=args.train_batch_size, test_batch_size=args.test_batch_size, augment=args.is_augmentation)
     
     elif args.dataset == 'shvn':
         in_dim = 32
         in_channels = 3
-        out_channels = 81
+        out_channels = args.out_channels
         conv_sizes=(16,32,60)
     
-        trainLoader, testLoader = train.svhn_loaders(train_batch_size=128, test_batch_size=400)
+        trainLoader, testLoader = train.svhn_loaders(train_batch_size=args.train_batch_size, test_batch_size=args.test_batch_size)
     
     else:
         raise ValueError(f'Wrong dataset, no dataset named {args.dataset}, expect one of [mnist, cifar10, shvn]')
@@ -145,8 +170,16 @@ if __name__ == '__main__':
                                 is_pruning=args.is_pruning)
     else:
         raise ValueError('Wrong model, expect [SingleFcNet, SingleConvNet, MultiConvNet]')
+    if args.model == 'SingleFcNet':
+        logging_path = f'./logging/{args.dataset}/{args.model}/out_dim_{args.out_dim}/{args.pruner}/sparsity_{args.sparsity}'
+        wandb_group_name = f'{args.dataset}_{args.model}_out_dim_{args.out_dim}'
+    elif args.model == 'SingleConvNet':
+        logging_path = f'./logging/{args.dataset}/{args.model}/out_channels_{args.out_channels}/{args.pruner}/sparsity_{args.sparsity}'
+        wandb_group_name = f'{args.dataset}_{args.model}_out_channels_{args.out_channels}'
+    else:
+        logging_path = f'./logging/{args.dataset}/{args.model}/conv_sizes_{conv_sizes[0]}_{conv_sizes[1]}_{conv_sizes[2]}/{args.pruner}/sparsity_{args.sparsity}'
+        wandb_group_name = f'{args.dataset}_{args.model}_conv_sizes_{conv_sizes[0]}_{conv_sizes[1]}_{conv_sizes[2]}'
     
-    logging_path = f'./logging/{args.dataset}/{args.model}/{args.pruner}/sparsity_{args.sparsity}'
     if not os.path.exists(logging_path):
         os.makedirs(logging_path)
     date = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
@@ -154,6 +187,20 @@ if __name__ == '__main__':
     logging.basicConfig(filename=logging_name, format='%(asctime)s %(message)s', filemode='a')
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
+
+    # wandb_logger = None
+    if args.is_wandb:
+        wandb_exp_name = f'sparsity_{args.sparsity}'
+        wandb.init(
+            project=f'PaI4MONDeq',
+            entity="pvh1602",
+            group=wandb_group_name,
+            name=wandb_exp_name,
+            job_type=f'{args.pruner}',
+            config=args
+        )
+    else:
+        wandb = None
 
     if args.is_pruning:
         masked_parameters_ = masked_parameters(model)
@@ -199,4 +246,5 @@ if __name__ == '__main__':
                 print_freq=100,
                 tune_alpha=True,
                 logger=logger,
+                wandb=wandb,
                 )

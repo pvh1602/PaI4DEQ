@@ -10,3 +10,5 @@ lth/
 tutorial.ipynb
 
 data/
+
+wandb/

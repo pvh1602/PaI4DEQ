@@ -20,7 +20,7 @@ def cuda(tensor):
 
 def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
           print_freq=10, change_mo=True, model_path=None, lr_mode='step',
-          step=10,tune_alpha=False,max_alpha=1., logger=None):
+          step=10,tune_alpha=False,max_alpha=1., logger=None, wandb=None):
 
 
     optimizer = optim.Adam(model.parameters(), lr=max_lr)
@@ -132,7 +132,14 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
         training_loss_history.append(avg_loss)
         training_forward_iters_history.append(avg_forward_iters)
         training_time_history.append(train_time)
+        test_acc = 100-err.item()
         test_acc_history.append(100-err.item())
+        
+        if wandb is not None:
+            wandb.log({'Training accuracy':avg_acc}, step=epoch)
+            wandb.log({'Training loss':avg_loss}, step=epoch)
+            wandb.log({'Training forward iters':avg_forward_iters}, step=epoch)
+            wandb.log({'Test accuracy':test_acc}, step=epoch)
     
     if logger is not None:
         logger.info('Training accuracy history')
