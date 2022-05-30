@@ -2,6 +2,16 @@ import torch
 import numpy as np
 from train import cuda
 
+
+def stats(model):
+    r"""Returns remaining and total number of prunable parameters.
+    """
+    remaining_params, total_params = 0, 0 
+    for n, mask in model.named_buffers():
+        remaining_params += mask.detach().cpu().numpy().sum()
+        total_params += mask.numel()
+    return remaining_params, total_params
+
 class Meter(object):
     """Computes and stores the min, max, avg, and current values"""
 

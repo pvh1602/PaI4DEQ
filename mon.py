@@ -187,6 +187,13 @@ def init_fft_conv(weight, hw):
     kernel = torch.flip(weight, (2, 3))
     kernel = F.pad(F.pad(kernel, (0, hw[0] - weight.shape[2], 0, hw[1] - weight.shape[3])),
                    (0, py, 0, px), mode="circular")[:, :, py:, px:]
+
+    # config for the new version of torch 1.8
+    # print("kernel size:", kernel.size())
+    # temp = (torch.fft.fft2(kernel))
+    
+    # print("Check the size of the tensor", temp.size())
+    # exit()
     return fft_to_complex_matrix(torch.rfft(kernel, 2, onesided=False))
 
 
@@ -198,7 +205,14 @@ def fft_conv(x, w_fft, transpose=False):
         w_fft: conv kernel processed by init_fft_conv
         transpose: flag of whether to transpose convolution
     """
+    # print('Vao')
+    # print("x size:", x.size())
+    # temp = torch.fft.fft2(x)
+    # print("Check the size of the tensor", temp.size())
+    # exit()
+
     x_fft = fft_to_complex_vector(torch.rfft(x, 2, onesided=False))
+
     wx_fft = x_fft.bmm(w_fft.transpose(1, 2)) if not transpose else x_fft.bmm(w_fft)
     wx_fft = wx_fft.view(x.shape[2], x.shape[3], wx_fft.shape[1], -1, 2).permute(2, 3, 0, 1, 4)
     return torch.irfft(wx_fft, 2, onesided=False)
@@ -413,7 +427,6 @@ class MONMultiConv(nn.Module):
                                      A1_n=self.A_n(i - 1), z0=z[i - 1], A2_n=self.A_n(i)))
         z_out.append(multiply_zi(z[n - 1], self.A(n - 1), self.B(n - 1),
                                  A1_n=self.A_n(n - 2), z0=z[n - 2]))
-
         return tuple(z_out)
 
     def multiply_transpose(self, *g):
@@ -580,8 +593,8 @@ class MaskedMONSingleConv(nn.Module):
         return (F.conv2d(self.cpad(x), self.U.get_masked_weight(), self.U.bias),)
 
     def multiply(self, *z):
-        A = self.A.get_masked_weight() / self.A.weight.view(-1).norm()
-        B = self.h * self.B.get_masked_weight() / self.B.weight.view(-1).norm()
+        A = self.A.get_masked_weight() / (self.A.get_masked_weight().view(-1).norm() + 1e-4)
+        B = self.h * self.B.get_masked_weight() / (self.B.get_masked_weight().view(-1).norm() + 1e-4)
         Az = F.conv2d(self.cpad(z[0]), A)
         ATAz = self.uncpad(F.conv_transpose2d(self.cpad(Az), A))
         Bz = F.conv2d(self.cpad(z[0]), B)
@@ -590,8 +603,8 @@ class MaskedMONSingleConv(nn.Module):
         return (z_out,)
 
     def multiply_transpose(self, *g):
-        A = self.A.get_masked_weight() / self.A.weight.view(-1).norm()
-        B = self.h * self.B.get_masked_weight() / self.B.weight.view(-1).norm()
+        A = self.A.get_masked_weight() / (self.A.get_masked_weight().view(-1).norm() + 1e-4)
+        B = self.h * self.B.get_masked_weight() / (self.B.get_masked_weight().view(-1).norm() + 1e-4)
         Ag = F.conv2d(self.cpad(g[0]), A)
         ATAg = self.uncpad(F.conv_transpose2d(self.cpad(Ag), A))
         Bg = F.conv2d(self.cpad(g[0]), B)
@@ -600,8 +613,8 @@ class MaskedMONSingleConv(nn.Module):
         return (g_out,)
 
     def init_inverse(self, alpha, beta):
-        A = self.A.get_masked_weight() / self.A.weight.view(-1).norm()
-        B = self.h * self.B.get_masked_weight() / self.B.weight.view(-1).norm()
+        A = self.A.get_masked_weight() / (self.A.get_masked_weight().view(-1).norm() + 1e-4)
+        B = self.h * self.B.get_masked_weight() / (self.B.get_masked_weight().view(-1).norm() + 1e-4)
         Afft = init_fft_conv(A, self.shp)
         Bfft = init_fft_conv(B, self.shp)
         I = torch.eye(Afft.shape[1], dtype=Afft.dtype,
@@ -632,6 +645,25 @@ class MaskedMONBorderReLU(nn.Module):
 
     def derivative(self, *z):
         return tuple((z_ > 0).type_as(z[0]) for z_ in z)
+
+class MaskedMONBorderSigmoid(nn.Module):
+    def __init__(self, border=1):
+        super().__init__()
+        self.border = border
+
+    def forward(self, *z):
+        zn_ = tuple(torch.sigmoid(z_) for z_ in z)
+        # zn = zn_.clone()
+        zn = tuple(zn__.clone() for zn__ in zn_)
+        for i in range(len(zn)):
+            zn[i][:, :, :self.border, :] = 0
+            zn[i][:, :, -self.border:, :] = 0
+            zn[i][:, :, :, :self.border] = 0
+            zn[i][:, :, :, -self.border:] = 0
+        return zn
+
+    def derivative(self, *z):
+        return tuple(torch.sigmoid(z_)*(1-torch.sigmoid(z_)) for z_ in z)
 
 
 class MaskedMONMultiConv(nn.Module):
@@ -682,13 +714,13 @@ class MaskedMONMultiConv(nn.Module):
             self.S_idxT.append(idxT)
 
     def A(self, i):
-        return torch.sqrt(self.g[i]) * self.A0[i].get_masked_weight() / self.A0[i].weight.view(-1).norm()
+        return torch.sqrt(self.g[i]) * self.A0[i].get_masked_weight() / (self.A0[i].get_masked_weight().view(-1).norm() + 1e-4)
 
     def A_n(self, i):
-        return torch.sqrt(self.gn[i]) * self.A_n0[i].get_masked_weight() / self.A_n0[i].weight.view(-1).norm()
+        return torch.sqrt(self.gn[i]) * self.A_n0[i].get_masked_weight() / (self.A_n0[i].get_masked_weight().view(-1).norm() + 1e-4)
 
     def B(self, i):
-        return self.h[i] * self.B0[i].get_masked_weight() / self.B0[i].weight.view(-1).norm()
+        return self.h[i] * self.B0[i].get_masked_weight() / (self.B0[i].get_masked_weight().view(-1).norm() + 1e-4)
 
     def cpad(self, x):
         return F.pad(x, self.pad, mode="circular")

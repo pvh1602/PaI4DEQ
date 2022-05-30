@@ -26,6 +26,7 @@ def prune_loop(model, loss, pruner, dataloader, device, sparsity, schedule, scop
         if invert:
             pruner.invert()
         pruner.mask(sparse, scope)
+        # print(pruner.scores)
     
     # Reainitialize weights
     if reinitialize:

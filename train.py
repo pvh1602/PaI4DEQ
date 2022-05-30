@@ -22,7 +22,6 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
           print_freq=10, change_mo=True, model_path=None, lr_mode='step',
           step=10,tune_alpha=False,max_alpha=1., logger=None, wandb=None):
 
-
     optimizer = optim.Adam(model.parameters(), lr=max_lr)
 
     if lr_mode == '1cycle':
@@ -40,7 +39,7 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
                                                 [0, (epochs - 5) // 2, epochs - 5, epochs],
                                                 [0.95, max_mo, 0.95, 0.95])[0]
 
-    model = cuda(model)
+    # model = cuda(model)
 
     training_loss_history = []
     training_acc_history = []
@@ -57,6 +56,7 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
         avg_acc = 0
         avg_forward_iters = 0
         
+        
         for batch_idx, batch in enumerate(trainLoader):
             if (batch_idx  == 30 or batch_idx == int(len(trainLoader)/2)) and tune_alpha:
                 run_tune_alpha(model, cuda(batch[0]), max_alpha)
@@ -69,6 +69,7 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
                 for param_group in optimizer.param_groups:
                     param_group['betas'] = (beta1, optimizer.param_groups[0]['betas'][1])
 
+            
             data, target = cuda(batch[0]), cuda(batch[1])
             optimizer.zero_grad()
             preds = model(data)
@@ -81,7 +82,8 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
             avg_forward_iters += model.mon.stats.fwd_iters.avg
             avg_loss += ce_loss.item()
             avg_acc += acc.item()
-
+            
+            
             if batch_idx % print_freq == 0 and batch_idx > 0:
                 incorrect = preds.float().argmax(1).ne(target.data).sum()
                 err = 100. * incorrect.float() / float(len(data))
@@ -180,6 +182,7 @@ def run_tune_alpha(model, x, max_alpha):
         print('alpha: {}\t iters: {}'.format(model.mon.alpha, iters_n))
         for name, param in model.mon.linear_module.named_parameters():
             print(f'norm of {name} is \t {torch.norm(param).item()}')
+        
         model.mon.stats.reset()
 
     if iters==model.mon.max_iter:
@@ -294,16 +297,20 @@ MON_DEFAULTS = {
 
 class SingleFcNet(nn.Module):
 
-    def __init__(self, splittingMethod, in_dim=784, out_dim=100, m=0.1, is_pruning=False, **kwargs):
+    def __init__(self, splittingMethod, in_dim=784, out_dim=100, m=0.1, is_pruning=False, pruner='', **kwargs):
         super().__init__()
         self.is_pruning = is_pruning
         # print('MON ReLU')
         # print('MONLeakyReLU')
         if is_pruning:
             linear_module = mon.MaskedMONSingleFc(in_dim, out_dim, m=m)
+            if pruner == 'grasp' or pruner == 'synflow':
+                nonlin_module = mon.MONSigmoid()
+            else:
+                nonlin_module = mon.MONReLU()
         else:    
             linear_module = mon.MONSingleFc(in_dim, out_dim, m=m)
-        nonlin_module = mon.MONReLU()
+            nonlin_module = mon.MONReLU()
         self.mon = splittingMethod(linear_module, nonlin_module, **expand_args(MON_DEFAULTS, kwargs))
         self.Wout = nn.Linear(out_dim, 10)
 
@@ -314,8 +321,7 @@ class SingleFcNet(nn.Module):
 
 
 class SingleConvNet(nn.Module):
-
-    def __init__(self, splittingMethod, in_dim=28, in_channels=1, out_channels=32, m=0.1, is_pruning=False, **kwargs):
+    def __init__(self, splittingMethod, in_dim=28, in_channels=1, out_channels=32, m=0.1, is_pruning=False, pruner='', **kwargs):
         super().__init__()
         n = in_dim + 2
         shp = (n, n)
@@ -323,14 +329,19 @@ class SingleConvNet(nn.Module):
         self.out_dim = out_channels * (n // self.pool) ** 2
         if is_pruning:
             linear_module = mon.MaskedMONSingleConv(in_channels, out_channels, shp, m=m)
-            nonlin_module = mon.MaskedMONBorderReLU(linear_module.pad[0])
+            if pruner == 'grasp' or pruner == 'synflow':
+                nonlin_module = mon.MaskedMONBorderSigmoid(linear_module.pad[0])
+            else:
+                nonlin_module = mon.MaskedMONBorderReLU(linear_module.pad[0])
+            # nonlin_module = mon.MaskedMONBorderSigmoid(linear_module.pad[0])
         else:
             linear_module = mon.MONSingleConv(in_channels, out_channels, shp, m=m)
             nonlin_module = mon.MONBorderReLU(linear_module.pad[0])
+
         self.mon = splittingMethod(linear_module, nonlin_module, **expand_args(MON_DEFAULTS, kwargs))
         self.Wout = nn.Linear(self.out_dim, 10)
 
-    def forward(self, x):
+    def forward(self, x): 
         x = F.pad(x, (1, 1, 1, 1))
         z = self.mon(x)
         z = F.avg_pool2d(z[-1], self.pool)
@@ -339,11 +350,14 @@ class SingleConvNet(nn.Module):
 
 class  MultiConvNet(nn.Module):
     def __init__(self, splittingMethod, in_dim=28, in_channels=1,
-                 conv_sizes=(16, 32, 64), m=1.0, is_pruning=False, **kwargs):
+                 conv_sizes=(16, 32, 64), m=1.0, is_pruning=False, pruner='', **kwargs):
         super().__init__()
         if is_pruning:
             linear_module = mon.MaskedMONMultiConv(in_channels, conv_sizes, in_dim+2, kernel_size=3, m=m)
-            nonlin_module = mon.MaskedMONBorderReLU(linear_module.pad[0])
+            if (pruner == 'grasp' or pruner == 'synflow'): # or pruner == 'synflow'
+                nonlin_module = mon.MaskedMONBorderSigmoid(linear_module.pad[0])
+            else:
+                nonlin_module = mon.MaskedMONBorderReLU(linear_module.pad[0])
         
         else:
             linear_module = mon.MONMultiConv(in_channels, conv_sizes, in_dim+2, kernel_size=3, m=m)

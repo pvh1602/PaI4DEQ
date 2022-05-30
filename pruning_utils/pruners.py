@@ -19,13 +19,14 @@ class Pruner:
         #     score[mask == 0.0] = -np.inf
 
         # Threshold scores
-        print('Globally masking checked')
+        # print('Globally masking checked')
         global_scores = torch.cat([torch.flatten(v) for v in self.scores.values()])
         k = int((1.0 - sparsity) * global_scores.numel())
         if not k < 1:
             threshold, _ = torch.kthvalue(global_scores, k)
             for mask, param in self.masked_parameters:
-                score = self.scores[id(param)] 
+                threshold = threshold.to(mask.device)
+                score = self.scores[id(param)].to(mask.device) 
                 zero = torch.tensor([0.]).to(mask.device)
                 one = torch.tensor([1.]).to(mask.device)
                 mask.copy_(torch.where(score <= threshold, zero, one))
@@ -48,7 +49,7 @@ class Pruner:
     def mask(self, sparsity, scope):
         r"""Updates masks of model with scores by sparsity according to scope.
         """
-        print('Masking checked')
+        # print('Masking checked')
         if scope == 'global':
             self._global_mask(sparsity)
         if scope == 'local':
@@ -122,6 +123,7 @@ class SNIP(Pruner):
         # compute gradient
         for batch_idx, (data, target) in enumerate(dataloader):
             data, target = data.to(device), target.to(device)
+            # model = model.to(device)
             output = model(data)
             loss(output, target).backward()
 
@@ -155,14 +157,14 @@ class GraSP(Pruner):
         stopped_grads = 0
         for batch_idx, (data, target) in enumerate(dataloader):
             data, target = data.to(device), target.to(device)
+            # model = model.to(device)
             output = model(data) / self.temp
             L = loss(output, target)
 
             grads = torch.autograd.grad(L, [p for (_, p) in self.masked_parameters], create_graph=False)
             flatten_grads = torch.cat([g.reshape(-1) for g in grads if g is not None])
             stopped_grads += flatten_grads
-        print('Gradient')
-        print(stopped_grads)
+    
         for g in stopped_grads:
             if torch.isnan(g):
                 print('NaN in Gradient!')
@@ -184,10 +186,9 @@ class GraSP(Pruner):
         # exit()
         
         # calculate score Hg * theta (negate to remove top percent)
-        print('Hg')
         for _, p in self.masked_parameters:
             self.scores[id(p)] = torch.clone(p.grad * p.data).detach()
-            print(p.grad.data)
+            # print(p.grad.data)
             p.grad.data.zero_()
 
         # normalize score
@@ -202,7 +203,7 @@ class SynFlow(Pruner):
         super(SynFlow, self).__init__(masked_parameters)
 
     def score(self, model, loss, dataloader, device):
-      
+        # model = model.to(device)
         @torch.no_grad()
         def linearize(model):
             # model.double()
@@ -219,7 +220,6 @@ class SynFlow(Pruner):
                 param.mul_(signs[name])
         
         signs = linearize(model)
-
         (data, _) = next(iter(dataloader))
         input_dim = list(data[0,:].shape)
         input = torch.ones([1] + input_dim).to(device)#, dtype=torch.float64).to(device)
@@ -231,4 +231,7 @@ class SynFlow(Pruner):
             p.grad.data.zero_()
 
         nonlinearize(model, signs)
+
+        # print('max score', torch.max(self.scores)
+        # print(self.scores)
 
