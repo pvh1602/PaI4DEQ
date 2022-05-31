@@ -336,8 +336,8 @@ if __name__ == '__main__':
         print(f'Expected remaining parameters \t {total_params*args.sparsity}')
         print('='*40)
 
-        print('The number of params is \t ', count_parameters(model))
-        exit()
+        print('The number of params of model is \t ', count_parameters(model))
+        # exit()
 
         if args.pruner == 'grasp' or args.pruner == 'synflow':
             # Assign mask from sigmoid model to model
