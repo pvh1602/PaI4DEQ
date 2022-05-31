@@ -34,6 +34,9 @@ def seed_everything(seed=1023):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Pruning at Initialization for Monotone DEQ')
     # Training Hyperparameters
@@ -327,6 +330,14 @@ if __name__ == '__main__':
         logger.info(f'Remaining parameters \t {remaining_params}')
         logger.info(f'Expected remaining parameters \t {total_params*args.sparsity}')
         logger.info('='*40)
+
+        print(f'Total parameters \t {total_params}')
+        print(f'Remaining parameters \t {remaining_params}')
+        print(f'Expected remaining parameters \t {total_params*args.sparsity}')
+        print('='*40)
+
+        print('The number of params is \t ', count_parameters(model))
+        exit()
 
         if args.pruner == 'grasp' or args.pruner == 'synflow':
             # Assign mask from sigmoid model to model

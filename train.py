@@ -44,6 +44,7 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
     training_loss_history = []
     training_acc_history = []
     test_acc_history = []
+    test_forwards_iters_history = []
     training_forward_iters_history = []
     training_time_history = []
 
@@ -109,10 +110,12 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
         avg_loss /= (batch_idx + 1)
         
         print("Tot train time: {}".format(time.time() - start))
+        model.mon.stats.reset()
 
         start = time.time()
         test_loss = 0
         incorrect = 0
+        
         model.eval()
         with torch.no_grad():
             for batch in testLoader:
@@ -127,6 +130,8 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
             print('\n\nTest set: Average loss: {:.4f}, Error: {}/{} ({:.2f}%)'.format(
                 test_loss, incorrect, nTotal, err))
 
+            avg_forward_iters_test = model.mon.stats.fwd_iters.avg
+            model.mon.stats.reset()
         print("Tot test time: {}\n\n\n\n".format(time.time() - start))
         
         # Log training information
@@ -136,12 +141,14 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
         training_time_history.append(train_time)
         test_acc = 100-err.item()
         test_acc_history.append(100-err.item())
+        test_forwards_iters_history.append(avg_forward_iters_test)
         
         if wandb is not None:
             wandb.log({'Training accuracy':avg_acc}, step=epoch)
             wandb.log({'Training loss':avg_loss}, step=epoch)
             wandb.log({'Training forward iters':avg_forward_iters}, step=epoch)
             wandb.log({'Test accuracy':test_acc}, step=epoch)
+            wandb.log({'Test forward iters':avg_forward_iters_test}, step=epoch)
     
     if logger is not None:
         logger.info('Training accuracy history')
@@ -158,6 +165,9 @@ def train(trainLoader, testLoader, model, epochs=15, max_lr=1e-3,
         logger.info('='*40)
         logger.info('Test accuracy history')
         logger.info(test_acc_history)
+        logger.info('='*40)
+        logger.info('Test forward iterations history')
+        logger.info(test_forwards_iters_history)
         logger.info('='*40)
         
 
