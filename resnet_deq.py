@@ -135,8 +135,8 @@ from torch.utils.data import DataLoader
 
 cifar10_train = datasets.CIFAR10("data", train=True, download=True, transform=transforms.ToTensor())
 cifar10_test = datasets.CIFAR10("data", train=False, download=True, transform=transforms.ToTensor())
-train_loader = DataLoader(cifar10_train, batch_size = 100, shuffle=True, num_workers=8)
-test_loader = DataLoader(cifar10_test, batch_size = 100, shuffle=False, num_workers=8)
+train_loader = DataLoader(cifar10_train, batch_size = 64, shuffle=True, num_workers=1)
+test_loader = DataLoader(cifar10_test, batch_size = 64, shuffle=False, num_workers=1)
 
 
 
@@ -146,7 +146,7 @@ def epoch(loader, model, device='cpu', opt=None, lr_scheduler=None):
     total_loss, total_err = 0.,0.
     model.eval() if opt is None else model.train()
     forward_iteration = 0.
-    for X,y in tqdm.tqdm(loader):
+    for X,y in loader:
         X,y = X.to(device), y.to(device)
         yp = model(X)
         loss = nn.CrossEntropyLoss()(yp,y)
@@ -158,7 +158,8 @@ def epoch(loader, model, device='cpu', opt=None, lr_scheduler=None):
                 
         total_err += (yp.max(dim=1)[1] != y).sum().item()
         total_loss += loss.item() * X.shape[0]
-        forward_iteration += model.forward_res
+        # forward_iteration += model.DEQFixedPoint.forward_res
+        forward_iteration = 0.        
 
     return total_err / len(loader.dataset), total_loss / len(loader.dataset), forward_iteration / len(loader.dataset)
 
@@ -306,10 +307,10 @@ if __name__ == '__main__':
         logger.info(f'Total parameters \t {total_params}')
         logger.info(f'Remaining parameters \t {remaining_params}')
         logger.info(f'Expected remaining parameters \t {total_params*args.sparsity}')
-        try:
-            logger.info('The number of params of model is \t ', count_parameters(model))
-        except:
-            pass
+        # try:
+        #     # logger.info('The number of params of model is \t ', count_parameters(model))
+        # except:
+        #     pass
         logger.info('='*40)
 
 
@@ -323,7 +324,7 @@ if __name__ == '__main__':
     else:
         print('='*40)
         print('NORMAL TRAINING')
-
+    print(model)
     opt = optim.Adam(model.parameters(), lr=1e-3)
     print("# Parmeters: ", sum(a.numel() for a in model.parameters()))
 
@@ -337,16 +338,19 @@ if __name__ == '__main__':
     train_forward_iters_history = []
     test_forward_iters_history = []
 
+    print('='*40)
+    print('Training model')
     for i in range(max_epochs):
         train_err, train_loss, train_forward_iters = epoch(train_loader, model, device, opt, scheduler)
-        test_err, test_loss, test_forward_iters = epoch(test_loader, model)
+        test_err, test_loss, test_forward_iters = epoch(test_loader, model, device)
         train_acc = 1 - train_err
         test_acc = 1 - test_err
 
+        print(f'Epoch {i} \t training accuracy {round(train_acc, 4)} \t test accuracy {round(test_acc, 4)}')
         train_acc_history.append(train_acc)
         train_loss_history.append(train_loss)
         test_acc_history.append(test_acc)
-        test_loss.history.append(test_loss)
+        test_loss_history.append(test_loss)
         train_forward_iters_history.append(train_forward_iters)
         test_forward_iters_history.append(test_forward_iters)
 
