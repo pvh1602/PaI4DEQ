@@ -47,7 +47,7 @@ class ResNetLayer(nn.Module):
 
 
 class MaskedResNetLayer(nn.Module):
-    def __init__(self, n_channels, n_inner_channels, kernel_size=3, num_groups=8):
+    def __init__(self, n_channels, n_inner_channels, kernel_size=3, num_groups=8, pruner=''):
         super().__init__()
         self.conv1 = Conv2d(n_channels, n_inner_channels, kernel_size, padding=kernel_size//2, bias=False)
         self.conv2 = Conv2d(n_inner_channels, n_channels, kernel_size, padding=kernel_size//2, bias=False)
@@ -57,9 +57,15 @@ class MaskedResNetLayer(nn.Module):
         self.conv1.weight.data.normal_(0, 0.01)
         self.conv2.weight.data.normal_(0, 0.01)
         
+        self.pruner = pruner
+        
     def forward(self, z, x):
-        y = self.norm1(F.relu(self.conv1(z)))
-        return self.norm3(F.relu(z + self.norm2(x + self.conv2(y))))
+        if self.pruner == 'grasp':
+            y = self.norm1(F.sigmoid(self.conv1(z)))
+            return self.norm3(F.sigmoid(z + self.norm2(x + self.conv2(y))))
+        else:
+            y = self.norm1(F.relu(self.conv1(z)))
+            return self.norm3(F.relu(z + self.norm2(x + self.conv2(y))))
 
 def anderson(f, x0, m=5, lam=1e-4, max_iter=50, tol=1e-2, beta = 1.0):
     """ Anderson acceleration for fixed point iteration. """
@@ -240,7 +246,7 @@ if __name__ == '__main__':
 
     # torch.manual_seed(0)
     chan = 48
-    f = MaskedResNetLayer(chan, 64, kernel_size=3)
+    f = MaskedResNetLayer(chan, 64, kernel_size=3, pruner=args.pruner)
     model = nn.Sequential(nn.Conv2d(3,chan, kernel_size=3, bias=True, padding=1),
                         nn.BatchNorm2d(chan),
                         DEQFixedPoint(f, anderson, tol=1e-2, max_iter=25, m=5),
