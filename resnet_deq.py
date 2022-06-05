@@ -61,8 +61,8 @@ class MaskedResNetLayer(nn.Module):
         
     def forward(self, z, x):
         if self.pruner == 'grasp':
-            y = self.norm1(F.sigmoid(self.conv1(z)))
-            return self.norm3(F.sigmoid(z + self.norm2(x + self.conv2(y))))
+            y = self.norm1(F.leaky_relu(self.conv1(z)))
+            return self.norm3(F.leaky_relu(z + self.norm2(x + self.conv2(y))))
         else:
             y = self.norm1(F.relu(self.conv1(z)))
             return self.norm3(F.relu(z + self.norm2(x + self.conv2(y))))
